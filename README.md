@@ -16,12 +16,15 @@
 
 ```
 MyDumper/
-├── dump.sh           # 主備份腳本
-├── restore.sh        # 還原腳本
-├── setup.sh          # 排程安裝腳本
-├── backup.conf       # 基本設定檔
-├── databases.ini     # 資料庫清單（多組備份用，INI 格式）
-├── logs/             # 日誌目錄
+├── dump.sh                # 主備份腳本
+├── restore.sh             # 還原腳本
+├── setup.sh               # 排程設定腳本
+├── backup.conf.example    # 基本設定檔範例
+├── databases.ini.example  # 資料庫清單範例（多組備份用）
+├── backup.conf            # 你的設定檔（不納入版控）
+├── databases.ini          # 你的資料庫清單（不納入版控）
+├── .gitignore             # Git 忽略設定
+├── logs/                  # 日誌目錄
 └── README.md
 ```
 
@@ -74,7 +77,18 @@ FLUSH PRIVILEGES;
 | RELOAD | 執行 FLUSH TABLES |
 | PROCESS | 查看執行中的查詢 |
 
-### 4. 編輯設定檔
+### 4. 複製並編輯設定檔
+
+```bash
+cd /root/MyDumper
+
+# 複製設定檔範例
+cp backup.conf.example backup.conf
+cp databases.ini.example databases.ini
+
+# 編輯基本設定
+vim backup.conf
+```
 
 #### 基本設定 `backup.conf`
 
@@ -147,7 +161,25 @@ cd /root/MyDumper
 ./setup.sh
 ```
 
-會引導你選擇執行時間並自動加入 crontab。
+執行後會顯示排程設定指引，支援多種環境：
+
+#### Hestia / cPanel 等控制面板
+
+1. 登入控制面板後台
+2. 進入 **Cron Jobs** → **Add Cron Job**
+3. 填入腳本顯示的設定值
+
+#### 手動設定 crontab
+
+```bash
+# 編輯 crontab
+crontab -e
+
+# 加入排程（每天凌晨 2 點執行）
+0 2 * * * /root/MyDumper/dump.sh >> /root/MyDumper/logs/cron.log 2>&1
+```
+
+> **注意**：`setup.sh` 不會自動修改 crontab，避免影響控制面板的排程管理。
 
 ### 查看備份結果
 
@@ -268,6 +300,25 @@ MySQL 密碼: ****
 ==========================================
 ```
 
+## Git 版本控制
+
+本專案使用 `.gitignore` 排除敏感設定檔，確保密碼等資訊不會被提交：
+
+**會被追蹤的檔案：**
+- `dump.sh`、`restore.sh`、`setup.sh`（腳本）
+- `backup.conf.example`、`databases.ini.example`（範例設定）
+- `README.md`
+
+**不會被追蹤的檔案：**
+- `backup.conf`、`databases.ini`（包含密碼的設定檔）
+- `backups/`（備份資料）
+- `logs/`（日誌）
+
+```bash
+# 更新專案時，你的設定檔不會被覆蓋
+git pull origin main
+```
+
 ## 常見問題
 
 ### Q: 出現 "Access denied; you need the RELOAD privilege"
@@ -317,13 +368,6 @@ MYDUMPER_BIN="/usr/local/bin/mydumper"
 **方法 2：直接使用 myloader**
 ```bash
 myloader -h localhost -u root -p'密碼' -B 資料庫名 -d /root/backups/database/資料庫名/20251215/ -o -v 3
-```
-
-## Crontab 範例
-
-```bash
-# 每天凌晨 2 點執行備份
-0 2 * * * /root/MyDumper/dump.sh >> /root/MyDumper/logs/cron.log 2>&1
 ```
 
 ## 授權

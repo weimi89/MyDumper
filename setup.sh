@@ -82,31 +82,28 @@ echo "Crontab 項目:"
 echo "$CRON_ENTRY"
 echo ""
 
-# 詢問是否安裝
-read -p "是否將排程加入 crontab? [y/N]: " CONFIRM
-
-if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-    # 備份現有 crontab
-    crontab -l > /tmp/crontab_backup_$(date +%Y%m%d) 2>/dev/null || true
-
-    # 移除舊的備份排程（如果存在）
-    (crontab -l 2>/dev/null | grep -v "dump.sh") | crontab - 2>/dev/null || true
-
-    # 添加新排程
-    (crontab -l 2>/dev/null; echo "$CRON_ENTRY") | crontab -
-
-    echo ""
-    echo "[OK] 排程已安裝!"
-    echo ""
-    echo "目前的 crontab:"
-    crontab -l
-else
-    echo ""
-    echo "已取消。你可以手動執行以下命令來安裝排程："
-    echo ""
-    echo "  (crontab -l 2>/dev/null; echo '$CRON_ENTRY') | crontab -"
-    echo ""
-fi
+# 顯示設定指引（不自動寫入，避免影響 Hestia/cPanel 等控制面板）
+echo "=========================================="
+echo "請依照您的環境選擇設定方式："
+echo "=========================================="
+echo ""
+echo "【方式 A】Hestia Control Panel"
+echo "  1. 登入 Hestia 後台"
+echo "  2. 進入 Cron Jobs → Add Cron Job"
+echo "  3. 填入以下設定："
+echo "     分鐘: $CRON_MIN"
+echo "     小時: $CRON_HOUR"
+echo "     日: *"
+echo "     月: *"
+echo "     週: *"
+echo "     命令: $DUMP_SCRIPT >> ${LOG_DIR}/cron.log 2>&1"
+echo ""
+echo "【方式 B】手動編輯 crontab"
+echo "  執行: crontab -e"
+echo "  加入: $CRON_ENTRY"
+echo ""
+echo "【方式 C】直接執行命令新增"
+echo "  (crontab -l 2>/dev/null; echo '$CRON_ENTRY') | crontab -"
 
 echo ""
 echo "=========================================="
