@@ -1,0 +1,28 @@
+# ============================================
+# 資料庫清單設定檔 (INI 格式)
+# ============================================
+# 使用方式：複製此檔案為 databases.ini 並填入您的設定
+# cp databases.ini.example databases.ini
+# ============================================
+# 每個資料庫使用 [database_X] 區塊定義
+# 密碼包含特殊字符請用雙引號包裹
+# 註解請使用 # 或 ;
+# ============================================
+
+# 範例配置：
+# [database_1]
+# host = localhost
+# port = 3306
+# user = root
+# pass = "my:password:here"
+# name = website_db
+
+# [database_2]
+# host = 192.168.1.100
+# port = 3306
+# user = backup_user
+# pass = simple_password
+# name = shop_db
+
+# === 請在下方加入你的資料庫 ===
+

@@ -1,1 +1,331 @@
-# MyDumper
+# MyDumper 資料庫備份工具
+
+使用 MyDumper 進行 MySQL/MariaDB 資料庫的每日自動備份。
+
+## 功能特點
+
+- 支援單一或多組資料庫批次備份
+- 自動偵測 CPU 核心數優化執行緒
+- 按資料庫分類的目錄結構
+- 自動清理過期備份
+- 備份壓縮節省空間
+- 詳細進度顯示與日誌記錄
+- 支援 crontab 排程
+
+## 目錄結構
+
+```
+MyDumper/
+├── dump.sh           # 主備份腳本
+├── restore.sh        # 還原腳本
+├── setup.sh          # 排程安裝腳本
+├── backup.conf       # 基本設定檔
+├── databases.ini     # 資料庫清單（多組備份用，INI 格式）
+├── logs/             # 日誌目錄
+└── README.md
+```
+
+## 安裝步驟
+
+### 1. 安裝 MyDumper
+
+```bash
+# Ubuntu/Debian
+apt-get install mydumper
+
+# CentOS/RHEL
+yum install mydumper
+
+# macOS
+brew install mydumper
+```
+
+### 2. 複製腳本到主機
+
+```bash
+scp -r MyDumper root@你的主機:/root/
+```
+
+### 3. 設定 MySQL 權限
+
+備份用戶需要以下權限：
+
+```sql
+-- 登入 MySQL
+mysql -u root -p
+
+-- 授予備份所需權限
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, RELOAD, PROCESS ON *.* TO '用戶名'@'localhost';
+FLUSH PRIVILEGES;
+
+-- 或針對特定資料庫
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON 資料庫名.* TO '用戶名'@'localhost';
+GRANT RELOAD, PROCESS ON *.* TO '用戶名'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+**權限說明**：
+| 權限 | 用途 |
+|------|------|
+| SELECT | 讀取資料 |
+| SHOW VIEW | 備份視圖 |
+| TRIGGER | 備份觸發器 |
+| LOCK TABLES | 鎖定表確保一致性 |
+| RELOAD | 執行 FLUSH TABLES |
+| PROCESS | 查看執行中的查詢 |
+
+### 4. 編輯設定檔
+
+#### 基本設定 `backup.conf`
+
+```bash
+# 資料庫連線（單一備份模式使用）
+DB_HOST="localhost"
+DB_PORT="3306"
+DB_USER="root"
+DB_PASS="你的密碼"
+DB_NAME="資料庫名稱"      # 留空則備份全部
+
+# 備份路徑
+BACKUP_DIR="/root/backups"
+RETENTION_DAYS=7          # 保留天數（0=不刪除）
+
+# MyDumper 設定
+THREADS=0                 # 0=自動偵測
+COMPRESS=1                # 1=啟用壓縮
+```
+
+#### 多組資料庫 `databases.ini`
+
+```ini
+# 每個資料庫使用 [database_X] 區塊定義
+# 密碼包含特殊字符請用雙引號包裹
+
+[database_1]
+host = localhost
+port = 3306
+user = root
+pass = "password123"
+name = website_db1
+
+[database_2]
+host = localhost
+port = 3306
+user = root
+pass = "my:password:with:colons"    # 密碼可以包含冒號
+name = website_db2
+
+[database_3]
+host = 192.168.1.100
+port = 3306
+user = backup_user
+pass = secret
+name = shop_db
+```
+
+**支援的 key 名稱**：
+| Key | 別名 | 說明 |
+|-----|------|------|
+| host | - | 資料庫主機 |
+| port | - | 連接埠（預設 3306）|
+| user | - | 用戶名 |
+| pass | password | 密碼（支援特殊字符）|
+| name | database, dbname | 資料庫名稱 |
+
+## 使用方式
+
+### 手動執行備份
+
+```bash
+cd /root/MyDumper
+./dump.sh
+```
+
+### 設定每日排程
+
+```bash
+./setup.sh
+```
+
+會引導你選擇執行時間並自動加入 crontab。
+
+### 查看備份結果
+
+```bash
+# 備份檔案
+ls -la /root/backups/database/
+
+# 今日日誌
+cat /root/MyDumper/logs/dump_$(date +%Y%m%d).log
+```
+
+## 還原備份
+
+### 互動式還原
+
+```bash
+./restore.sh
+```
+
+執行流程：
+```
+==========================================
+  MyLoader 資料庫還原工具
+==========================================
+
+可用的資料庫備份：
+
+  1) website_db1 (7 個備份, 最新: 20251215)
+  2) website_db2 (3 個備份, 最新: 20251215)
+
+請選擇要還原的資料庫 [1-2]: 1
+
+資料庫 [website_db1] 的可用備份：
+
+  1) 20251215 (大小: 1.2G, 檔案: 156)
+  2) 20251214 (大小: 1.1G, 檔案: 156)
+
+請選擇要還原的備份 [1-2]: 1
+
+MySQL 主機 [localhost]:
+MySQL 端口 [3306]:
+MySQL 用戶 [root]:
+MySQL 密碼: ****
+還原到資料庫名稱 [website_db1]: website_db1_restored
+
+警告：還原將覆蓋目標資料庫中的現有資料！
+是否要先清空目標資料庫？ [y/N]: y
+
+確定要執行還原嗎？ [y/N]: y
+
+>>> 正在還原 (執行中，請稍候...)
+...
+
+==========================================
+  還原成功！
+==========================================
+  耗時: 3分45秒
+  目標: website_db1_restored@localhost:3306
+==========================================
+```
+
+### 還原到不同資料庫
+
+可以將備份還原到不同名稱的資料庫：
+- 來源備份：`website_db1`
+- 還原目標：`website_db1_test` 或 `website_db1_20251215`
+
+這適用於：
+- 測試環境還原
+- 資料遷移
+- 建立開發環境副本
+
+## 備份目錄結構
+
+```
+/root/backups/
+└── database/
+    ├── website_db1/
+    │   ├── 20251213/
+    │   ├── 20251214/
+    │   └── 20251215/
+    ├── website_db2/
+    │   └── 20251215/
+    └── shop_db/
+        └── 20251215/
+```
+
+## 執行輸出範例
+
+```
+==========================================
+  批次備份模式 - 共 2 個資料庫
+==========================================
+
+----------------------------------------
+[1/2] website_db1
+----------------------------------------
+>>> 連線 root@localhost:3306 ...
+>>> 正在備份 website_db1 (執行中，請稍候...)
+** Message: Thread 1 dumping data for `website_db1`.`users`
+** Message: Thread 2 dumping data for `website_db1`.`orders`
+** Message: Finished dump at: 2025-12-15 14:31:56
+✓ website_db1 完成 (2分15秒, 1.2G)
+
+----------------------------------------
+[2/2] website_db2
+----------------------------------------
+>>> 連線 root@localhost:3306 ...
+>>> 正在備份 website_db2 (執行中，請稍候...)
+...
+✓ website_db2 完成 (0分45秒, 256M)
+
+==========================================
+  備份完成
+==========================================
+  總計: 2
+  成功: 2
+==========================================
+```
+
+## 常見問題
+
+### Q: 出現 "Access denied; you need the RELOAD privilege"
+
+**原因**：備份用戶缺少 RELOAD 權限
+
+**解決**：
+```sql
+GRANT RELOAD ON *.* TO '用戶名'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+### Q: 出現 "mydumper: command not found"
+
+**原因**：mydumper 未安裝或不在 PATH 中
+
+**解決**：
+```bash
+# 找到 mydumper 位置
+find /usr -name "mydumper" 2>/dev/null
+
+# 在 backup.conf 中設定路徑
+MYDUMPER_BIN="/usr/local/bin/mydumper"
+```
+
+### Q: 備份資料夾是空的
+
+**原因**：通常是連線或權限問題
+
+**解決**：
+1. 檢查日誌 `cat logs/dump_$(date +%Y%m%d).log`
+2. 手動測試連線 `mydumper -h localhost -u 用戶 -p密碼 -B 資料庫 -o /tmp/test -v 3`
+
+### Q: 如何還原備份？
+
+**方法 1：使用互動式還原腳本（推薦）**
+```bash
+./restore.sh
+```
+
+會引導你選擇：
+1. 要還原的資料庫
+2. 要還原的備份日期
+3. 目標連線資訊
+4. 是否清空現有資料
+
+**方法 2：直接使用 myloader**
+```bash
+myloader -h localhost -u root -p'密碼' -B 資料庫名 -d /root/backups/database/資料庫名/20251215/ -o -v 3
+```
+
+## Crontab 範例
+
+```bash
+# 每天凌晨 2 點執行備份
+0 2 * * * /root/MyDumper/dump.sh >> /root/MyDumper/logs/cron.log 2>&1
+```
+
+## 授權
+
+MIT License

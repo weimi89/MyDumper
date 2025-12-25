@@ -1,0 +1,25 @@
+# ============================================
+# MyDumper 專案 Git 忽略設定
+# ============================================
+
+# 配置檔案（包含敏感資訊）
+backup.conf
+databases.ini
+
+# 備份資料
+backups/
+
+# 日誌
+logs/
+*.log
+
+# Claude Code 設定
+.claude/
+
+# macOS
+.DS_Store
+
+# 編輯器
+*.swp
+*.swo
+*~

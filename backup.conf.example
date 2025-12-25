@@ -1,0 +1,38 @@
+#!/bin/bash
+# ============================================
+# MyDumper 資料庫備份設定檔
+# ============================================
+# 使用方式：複製此檔案為 backup.conf 並填入您的設定
+# cp backup.conf.example backup.conf
+# ============================================
+
+# 資料庫連線設定
+DB_HOST="localhost"
+DB_PORT="3306"
+DB_USER="root"
+DB_PASS=""                    # 若無密碼請留空
+DB_NAME=""                    # 指定資料庫名稱，留空則備份全部
+
+# 備份路徑設定
+BACKUP_DIR="/path/to/backups" # 備份根目錄（請修改為實際路徑）
+                              # 實際路徑: {BACKUP_DIR}/database/{DB_NAME}/{YYYYMMDD}
+RETENTION_DAYS=7              # 備份保留天數（0 = 不刪除舊備份）
+
+# MyDumper 進階設定
+THREADS=0                     # 並行執行緒數（0 = 自動偵測 CPU 核心數）
+COMPRESS=1                    # 是否壓縮 (1=是, 0=否)
+CHUNK_SIZE=50000              # 每個分塊的行數
+VERBOSE=0                     # 詳細日誌 (1=是, 0=否)
+DUMP_ROUTINES=1               # 備份預存程序 (1=是, 0=否)
+DUMP_TRIGGERS=1               # 備份觸發器 (1=是, 0=否)
+
+# 通知設定（可選）
+ENABLE_NOTIFICATION=0         # 是否啟用通知 (1=是, 0=否)
+NOTIFICATION_EMAIL=""         # 通知信箱
+
+# 日誌設定（預設為腳本所在目錄下的 logs）
+# LOG_DIR="${BACKUP_DIR}/logs"
+LOG_DIR=""  # 留空則使用專案目錄下的 logs/
+
+# MyDumper 執行檔路徑（留空則自動偵測）
+MYDUMPER_BIN=""  # 例如: /usr/local/bin/mydumper
