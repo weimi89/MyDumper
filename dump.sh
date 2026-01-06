@@ -136,9 +136,36 @@ dump_single() {
     local start_time=$(date +%s)
     local status="SUCCESS"
 
-    # 執行並即時顯示輸出（同時寫入日誌）
+    # 過濾輸出函數
+    filter_dump_output() {
+        local last_table=""
+        local table_count=0
+        while IFS= read -r line; do
+            # 完整日誌寫入文件
+            echo "$line" >> "$LOG_FILE"
+
+            # 提取表格備份進度
+            if [[ "$line" =~ "Dumping table" ]]; then
+                table_count=$((table_count + 1))
+                # 提取表名
+                if [[ "$line" =~ \.([a-zA-Z0-9_]+)$ ]]; then
+                    current_table="${BASH_REMATCH[1]}"
+                    printf "\r\033[1;36m  [備份中] 表格 %d: %-40s\033[0m" "$table_count" "$current_table"
+                fi
+            # 顯示錯誤和警告
+            elif [[ "$line" =~ ERROR|CRITICAL ]]; then
+                echo ""
+                echo -e "\033[1;31m  $line\033[0m"
+            elif [[ "$line" =~ "Finished dump" ]]; then
+                echo ""
+                echo -e "\033[1;32m  完成! 共 $table_count 個表格\033[0m"
+            fi
+        done
+    }
+
+    # 執行並過濾輸出
     local cmd_exit
-    eval "$cmd" 2>&1 | tee -a "$LOG_FILE"
+    eval "$cmd" 2>&1 | filter_dump_output
     cmd_exit=${PIPESTATUS[0]}
 
     if [[ $cmd_exit -eq 0 ]]; then

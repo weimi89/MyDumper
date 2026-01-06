@@ -192,6 +192,11 @@ if [[ "$OVERWRITE" =~ ^[Yy]$ ]]; then
     fi
 fi
 
+# 關閉嚴格模式以允許資料截斷（避免 ERROR 1265）
+echo -e "${CYAN}>>> 設定 SQL 模式...${NC}"
+mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -e "SET GLOBAL sql_mode = 'NO_ENGINE_SUBSTITUTION';" 2>&1 | tee -a "$LOG_FILE"
+log "INFO" "已關閉嚴格 SQL 模式"
+
 # 建構 myloader 命令
 CMD="$MYLOADER_BIN"
 CMD+=" -h $DB_HOST"
@@ -222,9 +227,46 @@ echo ""
 echo -e "${CYAN}>>> 正在還原 (執行中，請稍候...)${NC}"
 echo ""
 
-# 執行還原
+# 執行還原（優化輸出顯示）
 START_TIME=$(date +%s)
-eval "$CMD" 2>&1 | tee -a "$LOG_FILE"
+
+# 過濾函數：只顯示關鍵進度
+filter_output() {
+    local last_progress=""
+    local last_tables=""
+    while IFS= read -r line; do
+        # 完整日誌寫入文件
+        echo "$line" >> "$LOG_FILE"
+
+        # 提取進度資訊
+        if [[ "$line" =~ Progress\ ([0-9]+)\ of\ ([0-9]+).*Tables\ ([0-9]+)\ of\ ([0-9]+) ]]; then
+            progress="${BASH_REMATCH[1]}"
+            total="${BASH_REMATCH[2]}"
+            tables="${BASH_REMATCH[3]}"
+            total_tables="${BASH_REMATCH[4]}"
+            percent=$((progress * 100 / total))
+
+            # 只在進度變化時更新顯示
+            if [[ "$tables" != "$last_tables" ]]; then
+                printf "\r${CYAN}  [%3d%%] 進度: %d/%d 檔案 | 表格: %d/%d 完成${NC}    " \
+                    "$percent" "$progress" "$total" "$tables" "$total_tables"
+                last_tables="$tables"
+            fi
+        # 顯示錯誤和警告
+        elif [[ "$line" =~ ERROR|CRITICAL ]]; then
+            echo ""
+            echo -e "${RED}  $line${NC}"
+        # 顯示重要訊息
+        elif [[ "$line" =~ "restoring index:" ]]; then
+            : # 跳過索引訊息
+        elif [[ "$line" =~ "Table.*created" ]]; then
+            : # 跳過表格建立訊息
+        fi
+    done
+    echo ""  # 換行
+}
+
+eval "$CMD" 2>&1 | filter_output
 EXIT_CODE=${PIPESTATUS[0]}
 END_TIME=$(date +%s)
 
