@@ -101,6 +101,7 @@ dump_single() {
 
     # 輸出目錄
     cmd+=" -o $backup_path"
+    cmd+=" --clear"  # 清空目錄（覆蓋當天的備份）
 
     # 執行緒數（自動偵測 CPU 核心數 - 2）
     local threads="$THREADS"
@@ -138,27 +139,70 @@ dump_single() {
 
     # 過濾輸出函數
     filter_dump_output() {
-        local last_table=""
-        local table_count=0
+        local total_tables=0
+        local max_completed=0
+        local current_table=""
+        local spinner_idx=0
+        local spinner=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
+        local update_count=0
+
         while IFS= read -r line; do
             # 完整日誌寫入文件
             echo "$line" >> "$LOG_FILE"
 
-            # 提取表格備份進度
-            if [[ "$line" =~ "Dumping table" ]]; then
-                table_count=$((table_count + 1))
-                # 提取表名
-                if [[ "$line" =~ \.([a-zA-Z0-9_]+)$ ]]; then
-                    current_table="${BASH_REMATCH[1]}"
-                    printf "\r\033[1;36m  [備份中] 表格 %d: %-40s\033[0m" "$table_count" "$current_table"
+            # 提取進度資訊：Thread X: `db`.`table` [ 0% ] | Tables: 75/89
+            if [[ "$line" =~ Tables:\ ([0-9]+)/([0-9]+) ]]; then
+                local completed="${BASH_REMATCH[1]}"
+                total_tables="${BASH_REMATCH[2]}"
+
+                # 只記錄最大進度（避免倒退）
+                if [[ $completed -gt $max_completed ]]; then
+                    max_completed=$completed
                 fi
-            # 顯示錯誤和警告
+
+                # 提取表名
+                if [[ "$line" =~ \`[^\`]+\`\.\`([^\`]+)\` ]]; then
+                    current_table="${BASH_REMATCH[1]}"
+                fi
+
+                # 每 3 次更新一次顯示（減少閃爍）
+                update_count=$((update_count + 1))
+                if [[ $((update_count % 3)) -eq 0 ]] || [[ $max_completed -eq $total_tables ]]; then
+                    local percent=$((max_completed * 100 / total_tables))
+                    spinner_idx=$(( (spinner_idx + 1) % ${#spinner[@]} ))
+                    local spin="${spinner[$spinner_idx]}"
+
+                    # 進度條
+                    local bar_width=20
+                    local filled=$((percent * bar_width / 100))
+                    local empty=$((bar_width - filled))
+                    local bar=$(printf "%${filled}s" | tr ' ' '█')$(printf "%${empty}s" | tr ' ' '░')
+
+                    printf "\r\033[K\033[1;36m  %s [%s] %3d%% | %d/%d 表格 | %s\033[0m" \
+                        "$spin" "$bar" "$percent" "$max_completed" "$total_tables" "$current_table"
+                fi
+
+            # 顯示錯誤和警告（過濾已知的無害訊息）
             elif [[ "$line" =~ ERROR|CRITICAL ]]; then
-                echo ""
-                echo -e "\033[1;31m  $line\033[0m"
+                # 過濾已知的無害訊息
+                if [[ "$line" =~ "tokudb_version" ]]; then
+                    : # 忽略：TokuDB 引擎未安裝
+                elif [[ "$line" =~ "BINLOG MONITOR" ]]; then
+                    : # 忽略：缺少 BINLOG MONITOR 權限
+                elif [[ "$line" =~ "rename metadata" ]]; then
+                    : # 忽略：metadata 重命名問題（不影響備份）
+                else
+                    echo ""
+                    echo -e "\033[1;31m  $line\033[0m"
+                fi
             elif [[ "$line" =~ "Finished dump" ]]; then
-                echo ""
-                echo -e "\033[1;32m  完成! 共 $table_count 個表格\033[0m"
+                # 顯示最終 100% 狀態
+                if [[ $total_tables -gt 0 ]]; then
+                    local bar=$(printf "%20s" | tr ' ' '█')
+                    printf "\r\033[K\033[1;36m  ✓ [%s] 100%% | %d/%d 表格\033[0m\n" \
+                        "$bar" "$total_tables" "$total_tables"
+                fi
+                echo -e "\033[1;32m  ✓ 完成! 共 $total_tables 個表格\033[0m"
             fi
         done
     }

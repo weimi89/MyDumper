@@ -51,31 +51,73 @@ scp -r MyDumper root@你的主機:/root/
 
 ### 3. 設定 MySQL 權限
 
-備份用戶需要以下權限：
+建議建立專用的備份帳號：
 
 ```sql
 -- 登入 MySQL
 mysql -u root -p
+```
 
--- 授予備份所需權限
-GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, RELOAD, PROCESS ON *.* TO '用戶名'@'localhost';
+#### 建立備份專用帳號（推薦）
+
+```sql
+-- 1. 刪除可能存在的舊用戶（避免衝突）
+DROP USER IF EXISTS 'backup'@'%';
+DROP USER IF EXISTS 'backup'@'localhost';
+
+-- 2. 建立新用戶
+--    本機備份使用 'localhost'
+--    遠端備份使用 '%'（任意 IP）或 '192.168.1.%'（限定網段）
+CREATE USER 'backup'@'%' IDENTIFIED BY '你的安全密碼';
+
+-- 3. 授予備份所需權限（可備份所有資料庫）
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, RELOAD, PROCESS, BINLOG MONITOR
+ON *.* TO 'backup'@'%';
+
+-- 4. 套用權限
 FLUSH PRIVILEGES;
 
--- 或針對特定資料庫
-GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON 資料庫名.* TO '用戶名'@'localhost';
-GRANT RELOAD, PROCESS ON *.* TO '用戶名'@'localhost';
+-- 5. 確認用戶建立成功
+SELECT user, host FROM mysql.user WHERE user = 'backup';
+SHOW GRANTS FOR 'backup'@'%';
+```
+
+#### 只備份特定資料庫
+
+```sql
+-- 授權特定資料庫
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON 資料庫名.* TO 'backup'@'%';
+GRANT RELOAD, PROCESS ON *.* TO 'backup'@'%';  -- 這兩個必須是全域權限
 FLUSH PRIVILEGES;
 ```
 
+#### 測試連線
+
+```bash
+# 本機測試
+mysql -u backup -p -e "SELECT 1"
+
+# 遠端測試
+mysql -u backup -p -h 192.168.1.100 -e "SELECT 1"
+
+# 測試 mydumper
+mydumper -h 192.168.1.100 -u backup -p '密碼' -B 資料庫名 --no-data -v 3
+```
+
 **權限說明**：
-| 權限 | 用途 |
-|------|------|
-| SELECT | 讀取資料 |
-| SHOW VIEW | 備份視圖 |
-| TRIGGER | 備份觸發器 |
-| LOCK TABLES | 鎖定表確保一致性 |
-| RELOAD | 執行 FLUSH TABLES |
-| PROCESS | 查看執行中的查詢 |
+| 權限 | 用途 | 必要性 |
+|------|------|--------|
+| SELECT | 讀取資料 | 必要 |
+| SHOW VIEW | 備份視圖 | 必要 |
+| TRIGGER | 備份觸發器 | 必要 |
+| LOCK TABLES | 鎖定表確保一致性 | 必要 |
+| RELOAD | 執行 FLUSH TABLES | 建議 |
+| PROCESS | 查看執行中的查詢 | 建議 |
+| BINLOG MONITOR | 取得二進制日誌位置 | 選用（避免警告）|
+
+> **注意**：如果遠端備份出現 `Access denied for user 'backup'@'xxx.xxx.xxx.xxx'`，
+> 請確認沒有其他同名用戶（如 `backup@localhost`）造成優先級衝突。
+> 執行 `SELECT user, host FROM mysql.user WHERE user = 'backup';` 檢查。
 
 ### 4. 複製並編輯設定檔
 
