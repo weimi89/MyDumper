@@ -192,10 +192,20 @@ if [[ "$OVERWRITE" =~ ^[Yy]$ ]]; then
     fi
 fi
 
-# 關閉嚴格模式以允許資料截斷（避免 ERROR 1265）
-echo -e "${CYAN}>>> 設定 SQL 模式...${NC}"
-mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" -e "SET GLOBAL sql_mode = 'NO_ENGINE_SUBSTITUTION';" 2>&1 | tee -a "$LOG_FILE"
-log "INFO" "已關閉嚴格 SQL 模式"
+# 檢查 metadata 檔案格式 (MyLoader 0.21+ 需要 [config] section)
+# 注意：新版 mydumper 0.21+ 會自動產生正確格式，無需修復
+METADATA_FILE="$RESTORE_PATH/metadata"
+if [[ -f "$METADATA_FILE" ]]; then
+    if ! grep -q '^\[config\]' "$METADATA_FILE" 2>/dev/null; then
+        echo -e "${RED}[警告] metadata 檔案缺少 [config] section${NC}"
+        echo -e "${YELLOW}請確認備份端的 mydumper 版本 >= 0.12${NC}"
+        echo -e "${YELLOW}建議升級後重新備份：https://github.com/mydumper/mydumper/releases${NC}"
+        log "WARN" "metadata 檔案格式不正確，可能導致還原失敗"
+    fi
+fi
+
+# 注意：myloader 會自行處理 SQL mode，使用 --ignore-errors 忽略資料截斷問題
+log "INFO" "使用 myloader --ignore-errors 處理資料截斷問題"
 
 # 建構 myloader 命令
 CMD="$MYLOADER_BIN"
@@ -207,6 +217,8 @@ CMD+=" -B $TARGET_DB"
 CMD+=" -d $RESTORE_PATH"
 CMD+=" -o"  # 覆蓋表
 CMD+=" -v 3"  # 詳細輸出
+CMD+=" --ignore-errors 1265,1406"  # 忽略資料截斷錯誤 (1265=Data truncated, 1406=Data too long)
+CMD+=" --quote-character BACKTICK"  # 明確指定引號字元，避免依賴 metadata
 
 # 執行緒數
 THREADS="${THREADS:-0}"
@@ -233,7 +245,7 @@ START_TIME=$(date +%s)
 # 過濾函數：只顯示關鍵進度
 filter_output() {
     local last_progress=""
-    local last_tables=""
+    local last_percent=0
     while IFS= read -r line; do
         # 完整日誌寫入文件
         echo "$line" >> "$LOG_FILE"
@@ -246,16 +258,23 @@ filter_output() {
             total_tables="${BASH_REMATCH[4]}"
             percent=$((progress * 100 / total))
 
-            # 只在進度變化時更新顯示
-            if [[ "$tables" != "$last_tables" ]]; then
+            # 每 5% 或完成時更新顯示
+            if [[ $((percent - last_percent)) -ge 5 ]] || [[ "$progress" == "$total" ]]; then
                 printf "\r${CYAN}  [%3d%%] 進度: %d/%d 檔案 | 表格: %d/%d 完成${NC}    " \
                     "$percent" "$progress" "$total" "$tables" "$total_tables"
-                last_tables="$tables"
+                last_percent=$percent
             fi
-        # 顯示錯誤和警告
+        # 顯示錯誤和警告（過濾已知的無害警告）
         elif [[ "$line" =~ ERROR|CRITICAL ]]; then
-            echo ""
-            echo -e "${RED}  $line${NC}"
+            # 過濾已知的無害訊息
+            if [[ "$line" =~ "group_replication_transaction_size_limit" ]]; then
+                : # 忽略：目標 MySQL 不支援 Group Replication
+            elif [[ "$line" =~ "g_key_file_get_groups" ]]; then
+                : # 忽略：mydumper.cnf 配置文件不存在
+            else
+                echo ""
+                echo -e "${RED}  $line${NC}"
+            fi
         # 顯示重要訊息
         elif [[ "$line" =~ "restoring index:" ]]; then
             : # 跳過索引訊息

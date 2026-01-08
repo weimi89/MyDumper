@@ -321,6 +321,67 @@ git pull origin main
 
 ## 常見問題
 
+### Q: myloader 還原時出現 "Section [config] was not found on metadata file"
+
+**原因**：備份端的 mydumper 版本與還原端的 myloader 版本不相容。
+
+| 位置 | 版本 | metadata 格式 |
+|------|------|---------------|
+| 舊版 mydumper (< 0.12) | 0.10.x | 純文字格式 |
+| 新版 myloader (> 0.14) | 0.21.x | INI 格式 ([config] section) |
+
+**解決方案**：升級備份端的 mydumper 版本
+
+```bash
+# Ubuntu 24.04 LTS
+wget https://github.com/mydumper/mydumper/releases/download/v0.21.1-1/mydumper_0.21.1-1.noble_amd64.deb
+sudo dpkg -i mydumper_0.21.1-1.noble_amd64.deb
+
+# Ubuntu 22.04 LTS
+wget https://github.com/mydumper/mydumper/releases/download/v0.21.1-1/mydumper_0.21.1-1.jammy_amd64.deb
+sudo dpkg -i mydumper_0.21.1-1.jammy_amd64.deb
+
+# 驗證版本
+mydumper --version
+```
+
+**版本下載**：https://github.com/mydumper/mydumper/releases
+
+---
+
+### Q: 備份時出現 "Couldn't get master position" 警告
+
+**訊息**：
+```
+WARNING: Couldn't get master position - ERROR 1227: Access denied;
+you need (at least one of) the BINLOG MONITOR privilege(s) for this operation
+```
+
+**原因**：備份用戶缺少 BINLOG MONITOR 權限，無法記錄複製位置。
+
+**影響**：這只是警告，**不影響備份功能**。只有在需要設定主從複製時才需要此資訊。
+
+**解決**（可選）：
+```sql
+GRANT BINLOG MONITOR ON *.* TO '用戶名'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+---
+
+### Q: 備份時出現 "tokudb_version not found"
+
+**訊息**：
+```
+Message: @@tokudb_version not found - ERROR 1193: Unknown system variable 'tokudb_version'
+```
+
+**原因**：TokuDB 是已停止維護的儲存引擎，新版 mydumper 會檢查它是否存在。
+
+**影響**：**完全無影響**，可以忽略此訊息。
+
+---
+
 ### Q: 出現 "Access denied; you need the RELOAD privilege"
 
 **原因**：備份用戶缺少 RELOAD 權限
