@@ -149,7 +149,30 @@ RETENTION_DAYS=7          # 保留天數（0=不刪除）
 # MyDumper 設定
 THREADS=0                 # 0=自動偵測
 COMPRESS=1                # 1=啟用壓縮
+
+# MyLoader 還原設定
+OPTIMIZE_KEYS="auto"      # 索引與約束的建立時機
+RESTORE_SSH_HOST=""       # 還原到遠端時，查該主機磁碟空間用的 SSH 目標
 ```
+
+`RESTORE_SSH_HOST` 只影響還原前的磁碟空間檢查，不影響還原本身。
+還原寫入的是**目標主機**的磁碟，所以目標在遠端時必須連過去問那台；
+留空會直接用資料庫主機位址，SSH 帳號不同時填 `user@host`。
+連不上時腳本會明講查不到並詢問是否繼續，不會當作檢查通過。
+
+`OPTIMIZE_KEYS` 預設 `auto`，一般不需要改：
+
+| 值 | 行為 |
+|---|---|
+| `auto` | 還原前掃描備份，只有偵測到 myloader 無法正確拆解的定義時才關閉索引後建優化 |
+| `SKIP` | 一律不拆解，最穩但大表較慢（實測多約 4 成時間） |
+| `AFTER_IMPORT_PER_TABLE` | 一律使用索引後建優化，備份中若有觸雷的定義會導致還原中止 |
+| `AFTER_IMPORT_ALL_TABLES` | 同上，但等所有表匯入完才統一建索引 |
+
+會觸雷的是「CREATE TABLE 最後一項定義以很短的內容收尾」的資料表，
+最典型的是 `CONSTRAINT ... CHECK (\`is_active\` in (0,1))`。
+myloader 會把括號內的逗號誤當成分隔逗號改成分號，送出 `in (0;1))` 這種壞語法，
+整個還原以 `ERROR 1064` 中止。此行為在 mydumper 最新版仍存在，升級無法迴避。
 
 #### 多組資料庫 `databases.ini`
 

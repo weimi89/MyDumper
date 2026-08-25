@@ -20,6 +20,13 @@ RETENTION_DAYS=7              # 備份保留天數（0 = 不刪除舊備份）
 
 # MyDumper 進階設定
 THREADS=0                     # 並行執行緒數（0 = 自動偵測 CPU 核心數）
+OPTIMIZE_KEYS="auto"          # 還原時索引/約束的處理方式
+                              # auto = 掃描備份，只有踩到 myloader 拆解錯誤時才關閉優化
+                              # SKIP = 一律不拆解（最穩，但大表較慢）
+                              # AFTER_IMPORT_PER_TABLE / AFTER_IMPORT_ALL_TABLES = 一律優化
+RESTORE_SSH_HOST=""           # 還原到遠端主機時，用來查詢該主機磁碟空間的 SSH 目標
+                              # 留空 = 直接用資料庫主機位址；帳號不同時填 user@host
+                              # 連不上只會改為詢問是否繼續，不影響還原本身
 COMPRESS=1                    # 是否壓縮 (1=是, 0=否)
 CHUNK_SIZE=50000              # 每個分塊的行數
 VERBOSE=0                     # 詳細日誌 (1=是, 0=否)
