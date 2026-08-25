@@ -16,6 +16,9 @@ logs/
 # Claude Code 設定
 .claude/
 
+# Serena 專案索引
+.serena/
+
 # macOS
 .DS_Store
 
