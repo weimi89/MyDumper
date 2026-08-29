@@ -1,0 +1,6 @@
+# mydumper 連線的 session 設定（dump.sh 以 --defaults-extra-file 載入，與 /etc/mydumper.cnf 合併）
+# 備份本來就是整表撈，每張大表都會超過 long_query_time；關掉這條連線自己的慢查詢記錄，
+# 否則慢查詢日誌每天凌晨會被幾百筆 SQL_NO_CACHE 的備份查詢灌滿，真正該修的查詢反而被淹掉。
+# 只影響 mydumper 自己的連線，不動全域設定；一般權限帳號即可設定（已在 MariaDB 11.4 實測）。
+[mydumper_session_variables]
+slow_query_log = 0

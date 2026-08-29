@@ -126,6 +126,10 @@ dump_single() {
     # 詳細模式（預設啟用以顯示進度）
     cmd+=" -v 3"
 
+    # session 設定檔（關掉備份連線自己的慢查詢記錄等），檔案不在就照 /etc/mydumper.cnf 跑
+    local session_cnf="${SCRIPT_DIR}/mydumper-session.cnf"
+    [[ -f "$session_cnf" ]] && cmd+=" --defaults-extra-file $session_cnf"
+
     # 預存程序、觸發器
     [[ "${DUMP_ROUTINES:-1}" -eq 1 ]] && cmd+=" --routines"
     [[ "${DUMP_TRIGGERS:-1}" -eq 1 ]] && cmd+=" --triggers"
