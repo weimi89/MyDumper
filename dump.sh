@@ -113,7 +113,7 @@ dump_single() {
             cpu_cores=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 4)
         fi
         threads=$((cpu_cores > 2 ? cpu_cores - 2 : 1))
-        log "INFO" "CPU 核心數: $cpu_cores，使用執行緒: $threads"
+        log "INFO" "CPU 核心數: ${cpu_cores}，使用執行緒: ${threads}"
     fi
     cmd+=" -t $threads"
 
@@ -392,7 +392,7 @@ if [[ "$HAS_DB_LIST" -eq 1 ]]; then
     echo "=========================================="
     echo ""
 
-    log "INFO" "總計: $TOTAL，成功: $SUCCESS，失敗: $FAILED"
+    log "INFO" "總計: ${TOTAL}，成功: ${SUCCESS}，失敗: ${FAILED}"
     [[ $FAILED -gt 0 ]] && log "WARN" "失敗的資料庫: ${FAILED_DBS%, }"
 
 else

@@ -504,7 +504,7 @@ if [[ -f "$RESUME_FILE" ]]; then
     if [[ "$CLEAR_RESUME" =~ ^[Yy]$ ]]; then
         RESUME_BACKUP="${LOG_DIR}/resume.partial.$(date +%Y%m%d%H%M%S)"
         mv "$RESUME_FILE" "$RESUME_BACKUP"
-        echo -e "${GREEN}  已清除（原檔移至 $RESUME_BACKUP）${NC}"
+        echo -e "${GREEN}  已清除（原檔移至 ${RESUME_BACKUP}）${NC}"
         log "INFO" "清除續傳檔: $RESUME_FILE → $RESUME_BACKUP"
     else
         echo -e "${RED}  保留續傳檔，無法繼續還原${NC}"
@@ -588,6 +588,103 @@ else
     log "INFO" "依設定使用 --optimize-keys $OPTIMIZE_KEYS_MODE"
 fi
 
+# ============================================
+# DEFINER 帳號檢查
+# ============================================
+# view、trigger 與預存程序的 CREATE 語句帶著備份來源的 DEFINER 帳號（例如 `app`@`%`）。
+# 替不是自己的帳號建物件需要 SET USER 權限（舊版叫 SUPER）；還原帳號沒有這個權限時，
+# 資料會全部灌完，卻在最後建 trigger 那一步以 ERROR 1227 中止，整段還原時間白等。
+# 帳號比對是 user@host 整串相等，`app`@`%` 與 `app`@`127.0.0.1` 算不同帳號。
+# 就算有權限，DEFINER 帳號在目標主機不存在時 view 建得起來，查詢卻會以 ERROR 1449 失敗。
+# 這兩種情況都改帶 --skip-definer，讓物件改以還原帳號本人為 DEFINER。
+#
+# SKIP_DEFINER 可在 backup.conf 設定：
+#   auto（預設）= 只在上述兩種情況拿掉 DEFINER，否則原樣保留
+#   1 = 一律拿掉；0 = 一律保留（沒權限時還原會在最後一步中止）
+
+# 列出備份中所有物件用到的 DEFINER 帳號，格式 user@host，一行一個
+collect_backup_definers() {
+    local f
+    shopt -s nullglob
+    for f in "$RESTORE_PATH"/*-schema-view.sql* "$RESTORE_PATH"/*-schema-triggers.sql* "$RESTORE_PATH"/*-schema-post.sql*; do
+        read_schema_file "$f" | grep -oE 'DEFINER ?= ?`[^`]*`@`[^`]*`'
+    done | sed -E 's/DEFINER ?= ?`([^`]*)`@`([^`]*)`/\1@\2/' | sort -u
+    shopt -u nullglob
+}
+
+# 還原帳號能不能替別的帳號建物件（SET USER，或舊版的 SUPER / 全域 ALL PRIVILEGES）
+target_can_set_definer() {
+    mysql "${DEFINER_CONN[@]}" -N -e "SHOW GRANTS" 2>/dev/null | grep -E 'ON \*\.\* TO' | grep -qE 'ALL PRIVILEGES|(^|[ ,])SUPER([ ,]|$)|SET USER'
+}
+
+# 指定的 user@host 帳號是否存在於目標主機；查不到 mysql.user 時視為不存在
+target_account_exists() {
+    local user="${1%@*}" host="${1##*@}" n
+    user="${user//\'/\'\'}"; host="${host//\'/\'\'}"
+    n=$(mysql "${DEFINER_CONN[@]}" -N -e "SELECT COUNT(*) FROM mysql.user WHERE User='${user}' AND Host='${host}'" 2>/dev/null)
+    [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]]
+}
+
+# myloader 與 mysql 用戶端對 localhost 的處理不同：mysql 給了埠號就走 TCP，myloader 一律走 socket，
+# 兩邊可能認證成不同帳號（`app`@`127.0.0.1` 與 `app`@`localhost`）。DEFINER 比對要以 myloader 那條連線為準。
+DEFINER_CONN=("${MYSQL_CONN[@]}")
+if [[ "$USE_LOCAL_SOCKET" -eq 0 && "$DB_HOST" == "localhost" ]]; then
+    SOCKET_CONN=(--protocol=socket -u "$DB_USER")
+    [[ -n "$DB_PASS" ]] && SOCKET_CONN+=(-p"$DB_PASS")
+    mysql "${SOCKET_CONN[@]}" -N -e "SELECT 1" >/dev/null 2>&1 && DEFINER_CONN=("${SOCKET_CONN[@]}")
+fi
+
+SKIP_DEFINER="${SKIP_DEFINER:-auto}"
+SKIP_DEFINER_MODE=0
+
+if [[ "$SKIP_DEFINER" == "auto" ]]; then
+    echo ""
+    echo -e "${CYAN}>>> 檢查備份中的 DEFINER 帳號...${NC}"
+    BACKUP_DEFINERS=()
+    while IFS= read -r DEFINER_LINE; do
+        [[ -n "$DEFINER_LINE" ]] && BACKUP_DEFINERS+=("$DEFINER_LINE")
+    done < <(collect_backup_definers)
+    TARGET_USER=$(mysql "${DEFINER_CONN[@]}" -N -e "SELECT CURRENT_USER()" 2>/dev/null)
+    FOREIGN_DEFINERS=()
+    for DEFINER_LINE in "${BACKUP_DEFINERS[@]}"; do
+        [[ "$DEFINER_LINE" != "$TARGET_USER" ]] && FOREIGN_DEFINERS+=("$DEFINER_LINE")
+    done
+
+    if [[ ${#BACKUP_DEFINERS[@]} -eq 0 ]]; then
+        echo -e "${GREEN}  備份中沒有 view / trigger / 預存程序，不需處理${NC}"
+        log "INFO" "備份中沒有帶 DEFINER 的物件"
+    elif [[ ${#FOREIGN_DEFINERS[@]} -eq 0 ]]; then
+        echo -e "${GREEN}  DEFINER 皆為還原帳號本人（${TARGET_USER}），原樣保留${NC}"
+        log "INFO" "DEFINER 與還原帳號 $TARGET_USER 相同，保留原始 DEFINER"
+    elif ! target_can_set_definer; then
+        SKIP_DEFINER_MODE=1
+        echo -e "${YELLOW}  備份物件的 DEFINER 是別的帳號：${FOREIGN_DEFINERS[*]}${NC}"
+        echo -e "${YELLOW}  還原帳號 $TARGET_USER 沒有 SET USER 權限，無法替別人建物件，${NC}"
+        echo -e "${YELLOW}  已改為拿掉 DEFINER（--skip-definer），view / trigger 改以還原帳號為擁有者。${NC}"
+        log "WARN" "還原帳號 $TARGET_USER 無 SET USER 權限，DEFINER 為 ${FOREIGN_DEFINERS[*]}，改用 --skip-definer"
+    else
+        MISSING_DEFINERS=()
+        for DEFINER_LINE in "${FOREIGN_DEFINERS[@]}"; do
+            target_account_exists "$DEFINER_LINE" || MISSING_DEFINERS+=("$DEFINER_LINE")
+        done
+        if [[ ${#MISSING_DEFINERS[@]} -gt 0 ]]; then
+            SKIP_DEFINER_MODE=1
+            echo -e "${YELLOW}  目標主機沒有這些 DEFINER 帳號：${MISSING_DEFINERS[*]}${NC}"
+            echo -e "${YELLOW}  保留的話 view 查詢時會以 ERROR 1449 失敗，${NC}"
+            echo -e "${YELLOW}  已改為拿掉 DEFINER（--skip-definer），view / trigger 改以還原帳號為擁有者。${NC}"
+            log "WARN" "目標主機不存在 DEFINER 帳號 ${MISSING_DEFINERS[*]}，改用 --skip-definer"
+        else
+            echo -e "${GREEN}  DEFINER 帳號在目標主機都存在，原樣保留${NC}"
+            log "INFO" "DEFINER 帳號 ${FOREIGN_DEFINERS[*]} 存在於目標主機，保留原始 DEFINER"
+        fi
+    fi
+elif [[ "$SKIP_DEFINER" == "1" ]]; then
+    SKIP_DEFINER_MODE=1
+    log "INFO" "依設定一律拿掉 DEFINER（--skip-definer）"
+else
+    log "INFO" "依設定保留原始 DEFINER"
+fi
+
 # 注意：myloader 會自行處理 SQL mode，使用 --ignore-errors 忽略資料截斷問題
 log "INFO" "使用 myloader --ignore-errors 處理資料截斷問題"
 
@@ -610,6 +707,7 @@ CMD+=" -v 3"  # 詳細輸出
 CMD+=" --ignore-errors 1265,1406"  # 忽略資料截斷錯誤 (1265=Data truncated, 1406=Data too long)
 CMD+=" --quote-character BACKTICK"  # 明確指定引號字元，避免依賴 metadata
 [[ -n "$OPTIMIZE_KEYS_MODE" ]] && CMD+=" --optimize-keys $OPTIMIZE_KEYS_MODE"
+[[ "$SKIP_DEFINER_MODE" -eq 1 ]] && CMD+=" --skip-definer"
 
 # 執行緒數（磁碟空間不足時自動降低，減少暫存檔使用）
 THREADS="${THREADS:-0}"
@@ -780,6 +878,14 @@ else
         echo -e "${YELLOW}  5. 重啟 MySQL 可重置 ibtmp1 暫存表空間${NC}"
         echo -e "${YELLOW}  6. 如 innodb_file_per_table=OFF 需完整重建 InnoDB${NC}"
         log "ERROR" "磁碟空間不足導致還原失敗 (剩餘: ${FINAL_AVAILABLE_MB} MB)"
+    fi
+
+    # 檢查是否為 DEFINER 權限問題
+    if tail -n 300 "$LOG_FILE" | grep -q "ERROR 1227"; then
+        echo ""
+        echo -e "${RED}  原因：還原帳號無權替 DEFINER 指定的帳號建立 view / trigger（ERROR 1227）${NC}"
+        echo -e "${YELLOW}  請將 backup.conf 的 SKIP_DEFINER 設為 auto 或 1 後重新還原${NC}"
+        log "ERROR" "DEFINER 權限不足導致還原失敗 (ERROR 1227)"
     fi
 
     echo ""

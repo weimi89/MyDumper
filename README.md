@@ -152,6 +152,7 @@ COMPRESS=1                # 1=啟用壓縮
 
 # MyLoader 還原設定
 OPTIMIZE_KEYS="auto"      # 索引與約束的建立時機
+SKIP_DEFINER="auto"       # view / trigger 的 DEFINER 帳號處理
 RESTORE_SSH_HOST=""       # 還原到遠端時，查該主機磁碟空間用的 SSH 目標
 ```
 
@@ -173,6 +174,21 @@ RESTORE_SSH_HOST=""       # 還原到遠端時，查該主機磁碟空間用的 
 最典型的是 `CONSTRAINT ... CHECK (\`is_active\` in (0,1))`。
 myloader 會把括號內的逗號誤當成分隔逗號改成分號，送出 `in (0;1))` 這種壞語法，
 整個還原以 `ERROR 1064` 中止。此行為在 mydumper 最新版仍存在，升級無法迴避。
+
+`SKIP_DEFINER` 預設 `auto`，一般不需要改：
+
+| 值 | 行為 |
+|---|---|
+| `auto` | 還原帳號無權替 DEFINER 帳號建物件、或該帳號在目標主機不存在時，才拿掉 DEFINER |
+| `1` | 一律拿掉 DEFINER，view / trigger 改以還原帳號為擁有者 |
+| `0` | 一律保留備份中的 DEFINER |
+
+備份裡的 view、trigger、預存程序都帶著來源主機的 DEFINER 帳號（例如 `` `app`@`%` ``）。
+替不是自己的帳號建物件需要 `SET USER` 權限（舊版叫 `SUPER`），比對是 `user@host` 整串相等，
+`` `app`@`%` `` 與 `` `app`@`127.0.0.1` `` 算不同帳號。
+還原帳號沒有這個權限時，資料會全部灌完，卻在最後建 trigger 那一步以 `ERROR 1227` 中止；
+有權限但該帳號在目標主機不存在時，view 建得起來，查詢卻會以 `ERROR 1449` 失敗。
+`auto` 會在還原前先查清楚這兩點，需要時自動帶 `--skip-definer`。
 
 #### 多組資料庫 `databases.ini`
 

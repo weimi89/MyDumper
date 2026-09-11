@@ -24,6 +24,9 @@ OPTIMIZE_KEYS="auto"          # 還原時索引/約束的處理方式
                               # auto = 掃描備份，只有踩到 myloader 拆解錯誤時才關閉優化
                               # SKIP = 一律不拆解（最穩，但大表較慢）
                               # AFTER_IMPORT_PER_TABLE / AFTER_IMPORT_ALL_TABLES = 一律優化
+SKIP_DEFINER="auto"           # 還原時 view / trigger / 預存程序的 DEFINER 帳號處理
+                              # auto = 還原帳號無權替該帳號建物件、或該帳號在目標主機不存在時才拿掉
+                              # 1 = 一律拿掉（改以還原帳號為擁有者）；0 = 一律保留
 RESTORE_SSH_HOST=""           # 還原到遠端主機時，用來查詢該主機磁碟空間的 SSH 目標
                               # 留空 = 直接用資料庫主機位址；帳號不同時填 user@host
                               # 連不上只會改為詢問是否繼續，不影響還原本身
