@@ -83,8 +83,13 @@ count_non_trx_tables() {
         scope="table_schema NOT IN ('mysql','information_schema','performance_schema','sys')"
     fi
 
+    # mysql 用戶端給了埠號就走 TCP（MariaDB 11.8 連 --protocol=socket 都會被蓋掉），mydumper 對 localhost 一律走 socket；
+    # 帳號只開 @localhost 時走 TCP 會被當成 @127.0.0.1 擋下，所以 localhost 要跟 mydumper 一樣走 socket
+    local conn=(-h "$host" -P "$port")
+    [[ "$host" == "localhost" ]] && conn=(--protocol=socket)
+
     local count
-    count=$(MYSQL_PWD="$pass" "$client" -h "$host" -P "$port" -u "$user" -N -B -e \
+    count=$(MYSQL_PWD="$pass" "$client" "${conn[@]}" -u "$user" -N -B -e \
         "SELECT COUNT(*) FROM information_schema.tables WHERE ${scope} AND table_type = 'BASE TABLE' AND engine NOT IN ('InnoDB','RocksDB','TokuDB')" 2>/dev/null) || return 1
     [[ "$count" =~ ^[0-9]+$ ]] || return 1
     echo "$count"
