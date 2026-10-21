@@ -66,6 +66,31 @@ fi
 echo "使用 mydumper: $MYDUMPER_BIN"
 
 # ============================================
+# 計算備份範圍內的非交易型資料表數量
+# 印出數量並回傳 0；找不到用戶端或查詢失敗回傳 1（呼叫端不可當成 0 張）
+# dbname 留空時排除系統庫，MariaDB 的 mysql 庫本身就是 Aria，不排除會永遠誤判
+# ============================================
+count_non_trx_tables() {
+    local host="$1" port="$2" user="$3" pass="$4" dbname="$5"
+
+    local client
+    client=$(command -v mariadb || command -v mysql) || return 1
+
+    local scope
+    if [[ -n "$dbname" ]]; then
+        scope="table_schema = '${dbname}'"
+    else
+        scope="table_schema NOT IN ('mysql','information_schema','performance_schema','sys')"
+    fi
+
+    local count
+    count=$(MYSQL_PWD="$pass" "$client" -h "$host" -P "$port" -u "$user" -N -B -e \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE ${scope} AND table_type = 'BASE TABLE' AND engine NOT IN ('InnoDB','RocksDB','TokuDB')" 2>/dev/null) || return 1
+    [[ "$count" =~ ^[0-9]+$ ]] || return 1
+    echo "$count"
+}
+
+# ============================================
 # 單一資料庫備份函數
 # ============================================
 dump_single() {
@@ -125,6 +150,18 @@ dump_single() {
 
     # 詳細模式（預設啟用以顯示進度）
     cmd+=" -v 3"
+
+    # 非交易型資料表（MyISAM、Aria 等）：mydumper 預設只靠交易快照取一致性，遇到這類表會直接 CRITICAL 中止，
+    # 整庫一張都備不到。有的話改帶 --trx-tables=0，由全域鎖保證一致性（需要 RELOAD 權限）。
+    local non_trx_count
+    if non_trx_count=$(count_non_trx_tables "$host" "$port" "$user" "$pass" "$dbname"); then
+        if [[ "$non_trx_count" -gt 0 ]]; then
+            cmd+=" --trx-tables=0"
+            log "INFO" "偵測到 ${non_trx_count} 張非交易型資料表，改以全域鎖取得一致性"
+        fi
+    else
+        log "WARN" "無法偵測非交易型資料表（找不到 mysql 用戶端或查詢失敗），照預設方式備份"
+    fi
 
     # session 設定檔（關掉備份連線自己的慢查詢記錄等），檔案不在就照 /etc/mydumper.cnf 跑
     local session_cnf="${SCRIPT_DIR}/mydumper-session.cnf"

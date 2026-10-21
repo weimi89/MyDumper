@@ -111,9 +111,12 @@ mydumper -h 192.168.1.100 -u backup -p '密碼' -B 資料庫名 --no-data -v 3
 | SHOW VIEW | 備份視圖 | 必要 |
 | TRIGGER | 備份觸發器 | 必要 |
 | LOCK TABLES | 鎖定表確保一致性 | 必要 |
-| RELOAD | 執行 FLUSH TABLES | 建議 |
+| RELOAD | 執行 FLUSH TABLES／BACKUP STAGE，有非交易型資料表時靠它上全域鎖 | 必要（缺少會直接中止）|
 | PROCESS | 查看執行中的查詢 | 建議 |
-| BINLOG MONITOR | 取得二進制日誌位置 | 選用（避免警告）|
+| BINLOG MONITOR | 取得二進制日誌位置 | 必要（缺少時只印警告，但結束碼為 1，會被記成備份失敗；未開 binlog 也一樣）|
+
+> **非交易型資料表**（MyISAM、Aria 等）：`dump.sh` 會先查詢備份範圍內有沒有這類表，有的話自動改以全域鎖取得一致性（`--trx-tables=0`）。
+> 若 log 出現「無法偵測非交易型資料表」，代表主機上找不到 `mariadb`／`mysql` 用戶端，遇到這類表時備份會以 `Non transactional table found` 中止。
 
 > **注意**：如果遠端備份出現 `Access denied for user 'backup'@'xxx.xxx.xxx.xxx'`，
 > 請確認沒有其他同名用戶（如 `backup@localhost`）造成優先級衝突。
